@@ -1,5 +1,10 @@
 #include "Core/VkEngine.hpp"
 
+#ifdef _WIN32
+#define _USE_MATH_DEFINES
+#endif
+#include <cmath> 
+
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_video.h>
@@ -396,11 +401,22 @@ bool VkEngine::vk_load_shader( const char* path, VkShaderModule* shader ){
 void VkEngine::init_vk_pipelines(){
 	VkShaderModule triVert{}, triFrag{};
 
-	if( !vk_load_shader( "../../shader/triangle.vert.spv", &triVert )){
+
+#ifdef NO_FILE_PREFIX
+	#define FILE_PREFIX
+#else
+	#if _WIN32
+		#define FILE_PREFIX "../../../../"
+	#else
+		#define FILE_PREFIX "../../"
+	#endif
+#endif
+
+	if (!vk_load_shader(FILE_PREFIX "shader/triangle.vert.spv", &triVert)) {
 		std::cout << "Failed to load vert shader" << std::endl;
 	}
 
-	if( !vk_load_shader( "../../shader/triangle.frag.spv", &triFrag )){
+	if (!vk_load_shader(FILE_PREFIX "shader/triangle.frag.spv", &triFrag)) {
 		std::cout << "Failed to load vert shader" << std::endl;
 	}
 

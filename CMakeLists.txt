@@ -2,6 +2,8 @@ cmake_minimum_required( VERSION 3.8 )
 
 project( "VTT" )
 
+option( NO_FILE_PREFIX "Assumes the shader folder is copied to the executable folder" OFF )
+
 add_subdirectory( external )
 
 add_subdirectory( src )
