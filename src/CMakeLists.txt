@@ -8,7 +8,10 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
 add_executable( ${PROJECT_NAME}
 	Core/VkEngine.cpp
 	Core/VkInit.cpp
+	Core/VkMesh.cpp
 	Core/main.cpp )
 
 target_include_directories( ${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} )
 target_link_libraries( ${PROJECT_NAME} vkbootstrap glm Vulkan::Vulkan SDL2 vma )
+
+add_dependencies( ${PROJECT_NAME} Shaders )
