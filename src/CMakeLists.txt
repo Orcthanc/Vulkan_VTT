@@ -16,6 +16,13 @@ if( NO_FILE_PREFIX )
 endif( NO_FILE_PREFIX )
 
 target_include_directories( ${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} )
-target_link_libraries( ${PROJECT_NAME} vkbootstrap glm::glm Vulkan::Vulkan SDL2::SDL2 vma )
+target_link_libraries( ${PROJECT_NAME} vkbootstrap Vulkan::Vulkan SDL2::SDL2 vma )
+
+if(WIN32)
+	target_link_libraries( ${PROJECT_NAME} glm::glm )
+else(WIN32)
+	target_link_libraries( ${PROJECT_NAME} glm )
+endif(WIN32)
+
 
 add_dependencies( ${PROJECT_NAME} Shaders )
