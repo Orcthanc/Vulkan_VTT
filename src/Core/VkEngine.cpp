@@ -1,4 +1,5 @@
 #include "Core/VkEngine.hpp"
+#include "Core/VkMesh.hpp"
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -54,6 +55,8 @@ void VkEngine::init(){
 
 	load_meshes();
 
+	init_scene();
+
 	initialized = true;
 }
 
@@ -108,8 +111,15 @@ void VkEngine::draw(){
 
 	VK_CHECK( vkBeginCommandBuffer( main_cmd_buf, &beg_inf ));
 
-	VkClearValue clear_val{
-		.color = {{ 0.1, 0.1, 0.1, 1 }},
+	VkClearValue clear_vals[2]{
+		{
+			.color = {{ 0.1, 0.1, 0.1, 1 }},
+		},
+		{
+			.depthStencil = {
+				.depth = 1.0f,
+			}
+		}
 	};
 
 	VkRenderPassBeginInfo render_beg_inf{
@@ -121,12 +131,12 @@ void VkEngine::draw(){
 			.offset = { 0, 0 },
 			.extent = windowExtent,
 		},
-		.clearValueCount = 1,
-		.pClearValues = &clear_val,
+		.clearValueCount = 2,
+		.pClearValues = clear_vals,
 	};
 
 	vkCmdBeginRenderPass( main_cmd_buf, &render_beg_inf, VK_SUBPASS_CONTENTS_INLINE );
-
+/*
 	vkCmdBindPipeline( main_cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, triangle_pipeline );
 
 	VkDeviceSize offset = 0;
@@ -147,6 +157,8 @@ void VkEngine::draw(){
 	vkCmdPushConstants( main_cmd_buf, triangle_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( PushConstants ), &consts );
 
 	vkCmdDraw( main_cmd_buf, triangle_mesh.vertices.size(), 1, 0, 0 );
+*/
+	draw_objects( main_cmd_buf, objects.data(), objects.size() );
 
 	vkCmdEndRenderPass( main_cmd_buf );
 	VK_CHECK( vkEndCommandBuffer( main_cmd_buf ));
@@ -269,6 +281,32 @@ void VkEngine::init_vk_swapchain(){
 		});
 
 	deletion_queue.emplace_function( [this](){ vkDestroySwapchainKHR( vk_device, vk_swapchain, nullptr ); });
+
+	VkExtent3D depth_img_size = {
+		.width = windowExtent.width,
+		.height = windowExtent.height,
+		.depth = 1,
+	};
+
+	depth_format = VK_FORMAT_D32_SFLOAT;
+
+	auto img_cr_inf = vkinit::image_create_info( depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depth_img_size );
+
+	VmaAllocationCreateInfo img_alloc_inf = {
+		.usage = VMA_MEMORY_USAGE_GPU_ONLY,
+		.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+	};
+
+	vmaCreateImage( vma_alloc, &img_cr_inf, &img_alloc_inf, &depth_img.image, &depth_img.allocation, nullptr );
+
+	VkImageViewCreateInfo view_cr_inf = vkinit::image_view_create_info( depth_format, depth_img.image, VK_IMAGE_ASPECT_DEPTH_BIT );
+
+	VK_CHECK( vkCreateImageView( vk_device, &view_cr_inf, nullptr, &depth_view ));
+
+	deletion_queue.emplace_function( [this](){
+			vkDestroyImageView( vk_device, depth_view, nullptr );
+			vmaDestroyImage( vma_alloc, depth_img.image, depth_img.allocation );
+		});
 }
 
 void VkEngine::init_vk_cmd(){
@@ -307,17 +345,36 @@ void VkEngine::init_vk_default_renderpass(){
 		.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 	};
 
+	VkAttachmentDescription depth_attachment {
+		.format = depth_format,
+		.samples = VK_SAMPLE_COUNT_1_BIT,
+		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+		.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+		.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+	};
+
+	VkAttachmentReference depth_attach_ref {
+		.attachment = 1,
+		.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+	};
+
 	VkSubpassDescription subpass {
 		.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
 		.colorAttachmentCount = 1,
 		.pColorAttachments = &color_attach_ref,
+		.pDepthStencilAttachment = &depth_attach_ref,
 	};
+
+	VkAttachmentDescription attachments[2] = { color_attachment, depth_attachment };
 
 	VkRenderPassCreateInfo render_pass_cr_inf {
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
 		.pNext = nullptr,
-		.attachmentCount = 1,
-		.pAttachments = &color_attachment,
+		.attachmentCount = 2,
+		.pAttachments = attachments,
 		.subpassCount = 1,
 		.pSubpasses = &subpass,
 	};
@@ -332,7 +389,7 @@ void VkEngine::init_vk_framebuffers(){
 		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
 		.pNext = nullptr,
 		.renderPass = vk_render_pass,
-		.attachmentCount = 1,
+		.attachmentCount = 2,
 		.width = windowExtent.width,
 		.height = windowExtent.height,
 		.layers = 1,
@@ -342,7 +399,11 @@ void VkEngine::init_vk_framebuffers(){
 	vk_framebuffers.resize( swap_size );
 
 	for( size_t i = 0; i < swap_size; ++i ){
-		frame_cr_inf.pAttachments = &vk_swapchain_img_views[i];
+		VkImageView attachments[2];
+		attachments[0] = vk_swapchain_img_views[i];
+		attachments[1] = depth_view;
+
+		frame_cr_inf.pAttachments = attachments;
 		VK_CHECK( vkCreateFramebuffer( vk_device, &frame_cr_inf, nullptr, &vk_framebuffers[i] ));
 
 		deletion_queue.emplace_function( [this, i](){ vkDestroyFramebuffer( vk_device, vk_framebuffers[i], nullptr); });
@@ -415,9 +476,11 @@ void VkEngine::init_vk_pipelines(){
 	pipe_lay_cr_inf.pushConstantRangeCount = 1;
 	pipe_lay_cr_inf.pPushConstantRanges = &push_constant;
 
+	VkPipelineLayout triangle_layout;
+
 	VK_CHECK( vkCreatePipelineLayout( vk_device, &pipe_lay_cr_inf, nullptr, &triangle_layout ));
 
-	deletion_queue.emplace_function( [this](){ vkDestroyPipelineLayout( vk_device, triangle_layout, nullptr ); });
+	deletion_queue.emplace_function( [this, triangle_layout](){ vkDestroyPipelineLayout( vk_device, triangle_layout, nullptr ); });
 
 	PipelineBuilder pipe_builder;
 
@@ -454,14 +517,19 @@ void VkEngine::init_vk_pipelines(){
 	pipe_builder.rasterizer = vkinit::rasterization_state_create_info( VK_POLYGON_MODE_FILL );
 	pipe_builder.multisample_state = vkinit::multisample_state_create_info();
 	pipe_builder.color_blend = vkinit::color_blend_attachment_state();
+	pipe_builder.depth_stencil_state = vkinit::depth_stencil_state_create_info( VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL );
 	pipe_builder.pipeline_layout = triangle_layout;
+
+	VkPipeline triangle_pipeline;
 
 	triangle_pipeline = pipe_builder.build_pipeline( vk_device, vk_render_pass );
 
 	vkDestroyShaderModule( vk_device, triVert, nullptr );
 	vkDestroyShaderModule( vk_device, triFrag, nullptr );
 
-	deletion_queue.emplace_function( [this](){ vkDestroyPipeline( vk_device, triangle_pipeline, nullptr); });
+	deletion_queue.emplace_function( [this, triangle_pipeline](){ vkDestroyPipeline( vk_device, triangle_pipeline, nullptr); });
+
+	create_material( triangle_pipeline, triangle_layout, "default" );
 }
 
 VkPipeline PipelineBuilder::build_pipeline( VkDevice dev, VkRenderPass pass ){
@@ -493,6 +561,7 @@ VkPipeline PipelineBuilder::build_pipeline( VkDevice dev, VkRenderPass pass ){
 		.pViewportState = &view_state_cr_inf,
 		.pRasterizationState = &rasterizer,
 		.pMultisampleState = &multisample_state,
+		.pDepthStencilState = &depth_stencil_state,
 		.pColorBlendState = &color_blend_cr_inf,
 		.layout = pipeline_layout,
 		.renderPass = pass,
@@ -510,6 +579,8 @@ VkPipeline PipelineBuilder::build_pipeline( VkDevice dev, VkRenderPass pass ){
 }
 
 void VkEngine::load_meshes(){
+	Mesh triangle_mesh;
+
 	//make the array 3 vertices long
 	triangle_mesh.vertices.resize(3);
 
@@ -526,6 +597,69 @@ void VkEngine::load_meshes(){
 	//we don't care about the vertex normals
 
 	upload_mesh(triangle_mesh);
+
+	meshes["triangle"] = triangle_mesh;
+}
+
+Material* VkEngine::create_material( VkPipeline pipeline, VkPipelineLayout layout, const std::string& name ){
+	Material mat{
+		.pipeline = pipeline,
+		.layout = layout,
+	};
+	materials[name] = mat;
+	return &materials[name];
+}
+
+Material* VkEngine::get_material( const std::string& name ){
+	auto it = materials.find( name );
+	if( it == materials.end() )
+		return nullptr;
+	else
+		return &it->second;
+}
+
+Mesh* VkEngine::get_mesh( const std::string& name ){
+	auto it = meshes.find( name );
+	if( it == meshes.end() )
+		return nullptr;
+	else
+		return &it->second;
+}
+
+void VkEngine::draw_objects( VkCommandBuffer cmd, RenderableObject* first, int count ){
+	glm::vec3 camPos{ 0.0f, 0.0f, -4.0f };
+	glm::mat4 proj = glm::perspective( static_cast<float>( 0.25 * M_PI ), static_cast<float>( windowExtent.width ) / static_cast<float>( windowExtent.height ), 0.01f, 200.0f );
+	proj[1][1] *= -1;
+	glm::mat4 view = glm::translate( camPos );
+
+	Mesh* last_mesh = nullptr;
+	Material* last_mat = nullptr;
+
+	for( size_t i = 0; i < count; ++i ){
+		RenderableObject& curr = first[i];
+
+		if( curr.mat != last_mat ){
+			vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, curr.mat->pipeline );
+			last_mat = curr.mat;
+		}
+
+		glm::mat4 model = curr.transform;
+		glm::mat4 mod_view_proj = proj * view * model * glm::rotate( frameNumber * 0.04f, glm::vec3{ 0.0f, 1.0f, 0.0f });
+
+		PushConstants consts{
+			.camera = mod_view_proj,
+		};
+
+		vkCmdPushConstants( cmd, curr.mat->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( PushConstants ), &consts );
+
+		if( curr.mesh != last_mesh ){
+			VkDeviceSize off = 0;
+			vkCmdBindVertexBuffers( cmd, 0, 1, &curr.mesh->buffer.buffer, &off );
+			last_mesh = curr.mesh;
+		}
+
+		vkCmdDraw( cmd, curr.mesh->vertices.size(), 1, 0, 0 );
+	}
 }
 
 void VkEngine::upload_mesh( Mesh& mesh ){
@@ -549,4 +683,19 @@ void VkEngine::upload_mesh( Mesh& mesh ){
 	vmaMapMemory( vma_alloc, mesh.buffer.allocation, &data );
 	memcpy( data, mesh.vertices.data(), mesh.vertices.size() * sizeof( Vertex ));
 	vmaUnmapMemory( vma_alloc, mesh.buffer.allocation );
+}
+
+void VkEngine::init_scene(){
+	RenderableObject tri{
+		.mesh = get_mesh( "triangle" ),
+		.mat = get_material( "default" ),
+		.transform = glm::mat4( 1.0f ),
+	};
+
+	for( int y = 0; y < 21; ++y ){
+		for( int x = 0; x < 21; ++x ){
+			tri.transform = glm::scale( glm::vec3{ 0.3, 0.3, 0.3 }) * glm::translate( glm::vec3{ x - 10, y - 10.0f, 0 }) * glm::scale( glm::vec3{ 0.5f });
+			objects.push_back( tri );
+		}
+	}
 }

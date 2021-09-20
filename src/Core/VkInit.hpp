@@ -57,4 +57,22 @@ namespace vkinit {
 	VkPipelineLayoutCreateInfo pipeline_layout(
 
 		);
+
+	VkImageCreateInfo image_create_info(
+			VkFormat format,
+			VkImageUsageFlags usage,
+			VkExtent3D size
+		);
+
+	VkImageViewCreateInfo image_view_create_info(
+			VkFormat format,
+			VkImage image,
+			VkImageAspectFlags aspect
+		);
+
+	VkPipelineDepthStencilStateCreateInfo depth_stencil_state_create_info(
+			VkBool32 depth_test,
+			VkBool32 depth_write,
+			VkCompareOp op
+		);
 }

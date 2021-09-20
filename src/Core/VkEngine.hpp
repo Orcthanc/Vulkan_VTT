@@ -8,6 +8,8 @@
 #include <vector>
 #include <deque>
 #include <functional>
+#include <unordered_map>
+#include <string>
 
 struct DelQueue {
 	std::deque<std::function<void()>> deleters;
@@ -23,6 +25,17 @@ struct DelQueue {
 
 		deleters.clear();
 	}
+};
+
+struct Material {
+	VkPipeline pipeline;
+	VkPipelineLayout layout;
+};
+
+struct RenderableObject {
+	Mesh* mesh;
+	Material* mat;
+	glm::mat4 transform;
 };
 
 struct VkEngine {
@@ -42,6 +55,20 @@ struct VkEngine {
 		void run();
 
 	public:
+		//Scene
+		std::vector<RenderableObject> objects;
+
+		std::unordered_map<std::string, Material> materials;
+		std::unordered_map<std::string, Mesh> meshes;
+
+		Material* create_material( VkPipeline pipeline, VkPipelineLayout layout, const std::string& name );
+		Material* get_material( const std::string& name );
+
+		Mesh* get_mesh( const std::string& name );
+
+		void draw_objects( VkCommandBuffer cmd, RenderableObject* first, int count );
+
+	public:
 		//Base Vulkan
 		VkInstance vk_instance;
 		VkDebugUtilsMessengerEXT vk_debug_messenger;
@@ -58,6 +85,11 @@ struct VkEngine {
 		std::vector<VkImage> vk_swapchain_imgs;
 		std::vector<VkImageView> vk_swapchain_img_views;
 
+		VkImageView depth_view;
+		AllocatedImage depth_img;
+
+		VkFormat depth_format;
+
 		//Rendering
 		VkQueue vk_graphics_queue;
 		uint32_t vk_graphics_queue_family;
@@ -71,12 +103,6 @@ struct VkEngine {
 		//Synchronization
 		VkSemaphore vk_sema_present, vk_sema_render;
 		VkFence vk_fence_render;
-
-		//Pipeline
-		VkPipelineLayout triangle_layout;
-		VkPipeline triangle_pipeline;
-
-		Mesh triangle_mesh;
 
 	private:
 		void init_vk();
@@ -94,6 +120,8 @@ struct VkEngine {
 		void load_meshes();
 
 		void upload_mesh( Mesh& mesh );
+
+		void init_scene();
 };
 
 struct PipelineBuilder {
@@ -107,5 +135,6 @@ struct PipelineBuilder {
 	VkPipelineRasterizationStateCreateInfo rasterizer;
 	VkPipelineColorBlendAttachmentState color_blend;
 	VkPipelineMultisampleStateCreateInfo multisample_state;
+	VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
 	VkPipelineLayout pipeline_layout;
 };
