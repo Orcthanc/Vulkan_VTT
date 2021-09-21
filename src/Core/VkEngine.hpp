@@ -10,6 +10,7 @@
 #include <functional>
 #include <unordered_map>
 #include <string>
+#include <vulkan/vulkan_core.h>
 
 struct DelQueue {
 	std::deque<std::function<void()>> deleters;
@@ -36,6 +37,23 @@ struct RenderableObject {
 	Mesh* mesh;
 	Material* mat;
 	glm::mat4 transform;
+};
+
+struct FrameData {
+	VkSemaphore present_sema, render_sema;
+	VkFence render_fence;
+
+	VkCommandPool cmd_pool;
+	VkCommandBuffer main_buf;
+
+	AllocatedBuffer camera_buf;
+	VkDescriptorSet global_desc;
+};
+
+struct GpuCamData {
+	glm::mat4 view;
+	glm::mat4 proj;
+	glm::mat4 view_proj;
 };
 
 struct VkEngine {
@@ -94,17 +112,20 @@ struct VkEngine {
 		VkQueue vk_graphics_queue;
 		uint32_t vk_graphics_queue_family;
 
-		VkCommandPool vk_cmd_pool;
-		VkCommandBuffer main_cmd_buf;
+		constexpr static unsigned FRAME_OVERLAP = 2;
+		FrameData frames[FRAME_OVERLAP];
+
+		FrameData& get_curr_frame();
 
 		VkRenderPass vk_render_pass;
 		std::vector<VkFramebuffer> vk_framebuffers;
 
-		//Synchronization
-		VkSemaphore vk_sema_present, vk_sema_render;
-		VkFence vk_fence_render;
+		VkDescriptorSetLayout global_desc_layout;
+		VkDescriptorPool desc_pool;
+
 
 	private:
+		//Init
 		void init_vk();
 		void init_vk_swapchain();
 		void init_vk_cmd();
@@ -114,14 +135,19 @@ struct VkEngine {
 
 		void init_vk_sync();
 
-		bool vk_load_shader( const char* path, VkShaderModule* shader );
 		void init_vk_pipelines();
 
 		void load_meshes();
 
+		void init_scene();
+
+		void init_descriptors();
+
+		//Vulkan helpers
+		bool vk_load_shader( const char* path, VkShaderModule* shader );
 		void upload_mesh( Mesh& mesh );
 
-		void init_scene();
+		AllocatedBuffer create_buffer( size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memory_usage );
 };
 
 struct PipelineBuilder {

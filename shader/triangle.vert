@@ -7,14 +7,20 @@ layout( location = 2 ) in vec3 vCol;
 
 layout( location = 0 ) out vec3 fragCol;
 
+layout( set = 0, binding = 0 ) uniform CameraBuffer {
+	mat4 view;
+	mat4 proj;
+	mat4 view_proj;
+} cam_data;
+
 layout( push_constant ) uniform constants
 {
 	vec4 data;
-	mat4 camera;
+	mat4 model;
 } PushConstants;
 
 void main()
 {
-	gl_Position = PushConstants.camera * vec4( vPos, 1.0f );
+	gl_Position = cam_data.view_proj * PushConstants.model * vec4( vPos, 1.0f );
 	fragCol = vCol;
 }

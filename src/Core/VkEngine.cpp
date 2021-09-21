@@ -1,10 +1,11 @@
 #include "Core/VkEngine.hpp"
 #include "Core/VkMesh.hpp"
+#include "Core/VkTypes.hpp"
 
 #ifdef _WIN32
 #define _USE_MATH_DEFINES
 #endif
-#include <cmath> 
+#include <cmath>
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
@@ -56,6 +57,8 @@ void VkEngine::init(){
 	init_vk_framebuffers();
 	init_vk_sync();
 
+	init_descriptors();
+
 	init_vk_pipelines();
 
 	load_meshes();
@@ -105,16 +108,16 @@ void VkEngine::deinit(){
 }
 
 void VkEngine::draw(){
-	VK_CHECK( vkWaitForFences( vk_device, 1, &vk_fence_render, VK_TRUE, 1000000000 ));
-	VK_CHECK( vkResetFences( vk_device, 1, &vk_fence_render ));
+	VK_CHECK( vkWaitForFences( vk_device, 1, &get_curr_frame().render_fence, VK_TRUE, 1000000000 ));
+	VK_CHECK( vkResetFences( vk_device, 1, &get_curr_frame().render_fence ));
 
 	uint32_t render_img;
-	VK_CHECK( vkAcquireNextImageKHR( vk_device, vk_swapchain, 1000000000, vk_sema_present, VK_NULL_HANDLE, &render_img ));
+	VK_CHECK( vkAcquireNextImageKHR( vk_device, vk_swapchain, 1000000000, get_curr_frame().present_sema, VK_NULL_HANDLE, &render_img ));
 
-	VK_CHECK( vkResetCommandBuffer( main_cmd_buf, 0 ));
+	VK_CHECK( vkResetCommandBuffer( get_curr_frame().main_buf, 0 ));
 	auto beg_inf = vkinit::command_buffer_begin_info();
 
-	VK_CHECK( vkBeginCommandBuffer( main_cmd_buf, &beg_inf ));
+	VK_CHECK( vkBeginCommandBuffer( get_curr_frame().main_buf, &beg_inf ));
 
 	VkClearValue clear_vals[2]{
 		{
@@ -140,7 +143,7 @@ void VkEngine::draw(){
 		.pClearValues = clear_vals,
 	};
 
-	vkCmdBeginRenderPass( main_cmd_buf, &render_beg_inf, VK_SUBPASS_CONTENTS_INLINE );
+	vkCmdBeginRenderPass( get_curr_frame().main_buf, &render_beg_inf, VK_SUBPASS_CONTENTS_INLINE );
 /*
 	vkCmdBindPipeline( main_cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, triangle_pipeline );
 
@@ -163,10 +166,10 @@ void VkEngine::draw(){
 
 	vkCmdDraw( main_cmd_buf, triangle_mesh.vertices.size(), 1, 0, 0 );
 */
-	draw_objects( main_cmd_buf, objects.data(), objects.size() );
+	draw_objects( get_curr_frame().main_buf, objects.data(), objects.size() );
 
-	vkCmdEndRenderPass( main_cmd_buf );
-	VK_CHECK( vkEndCommandBuffer( main_cmd_buf ));
+	vkCmdEndRenderPass( get_curr_frame().main_buf );
+	VK_CHECK( vkEndCommandBuffer( get_curr_frame().main_buf ));
 
 	VkPipelineStageFlags waitStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
@@ -174,21 +177,21 @@ void VkEngine::draw(){
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.pNext = nullptr,
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &vk_sema_present,
+		.pWaitSemaphores = &get_curr_frame().present_sema,
 		.pWaitDstStageMask = &waitStages,
 		.commandBufferCount = 1,
-		.pCommandBuffers = &main_cmd_buf,
+		.pCommandBuffers = &get_curr_frame().main_buf,
 		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &vk_sema_render,
+		.pSignalSemaphores = &get_curr_frame().render_sema,
 	};
 
-	VK_CHECK( vkQueueSubmit( vk_graphics_queue, 1, &sub_inf, vk_fence_render ));
+	VK_CHECK( vkQueueSubmit( vk_graphics_queue, 1, &sub_inf, get_curr_frame().render_fence ));
 
 	VkPresentInfoKHR pres_inf = {
 		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 		.pNext = nullptr,
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &vk_sema_render,
+		.pWaitSemaphores = &get_curr_frame().render_sema,
 		.swapchainCount = 1,
 		.pSwapchains = &vk_swapchain,
 		.pImageIndices = &render_img,
@@ -321,16 +324,18 @@ void VkEngine::init_vk_cmd(){
 			VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
 		);
 
-	VK_CHECK( vkCreateCommandPool( vk_device, &cmd_pool_cr_inf, nullptr, &vk_cmd_pool ));
+	for( size_t i = 0; i < FRAME_OVERLAP; ++i ){
+		VK_CHECK( vkCreateCommandPool( vk_device, &cmd_pool_cr_inf, nullptr, &frames[i].cmd_pool ));
 
-	deletion_queue.emplace_function( [this](){ vkDestroyCommandPool( vk_device, vk_cmd_pool, nullptr ); });
+		deletion_queue.emplace_function( [this, i](){ vkDestroyCommandPool( vk_device, frames[i].cmd_pool, nullptr ); });
 
-	auto cmd_alloc_inf =
-		vkinit::command_buffer_allocate_info(
-			vk_cmd_pool
-		);
+		auto cmd_alloc_inf =
+			vkinit::command_buffer_allocate_info(
+				frames[i].cmd_pool
+			);
 
-	VK_CHECK( vkAllocateCommandBuffers( vk_device, &cmd_alloc_inf, &main_cmd_buf ));
+		VK_CHECK( vkAllocateCommandBuffers( vk_device, &cmd_alloc_inf, &frames[i].main_buf ));
+	}
 }
 
 void VkEngine::init_vk_default_renderpass(){
@@ -417,16 +422,19 @@ void VkEngine::init_vk_framebuffers(){
 
 void VkEngine::init_vk_sync(){
 	auto fence_cr_inf = vkinit::fence_create_info( VK_FENCE_CREATE_SIGNALED_BIT );
-	VK_CHECK( vkCreateFence( vk_device, &fence_cr_inf, nullptr, &vk_fence_render ));
-
-	deletion_queue.emplace_function( [this](){ vkDestroyFence( vk_device, vk_fence_render, nullptr ); });
-
 	auto sem_cr_inf = vkinit::semaphore_create_info();
-	VK_CHECK( vkCreateSemaphore( vk_device, &sem_cr_inf, nullptr, &vk_sema_present ));
-	VK_CHECK( vkCreateSemaphore( vk_device, &sem_cr_inf, nullptr, &vk_sema_render ));
 
-	deletion_queue.emplace_function( [this](){ vkDestroySemaphore( vk_device, vk_sema_present, nullptr ); });
-	deletion_queue.emplace_function( [this](){ vkDestroySemaphore( vk_device, vk_sema_render, nullptr ); });
+	for( size_t i = 0; i < FRAME_OVERLAP; ++i ){
+		VK_CHECK( vkCreateFence( vk_device, &fence_cr_inf, nullptr, &frames[i].render_fence ));
+
+		deletion_queue.emplace_function( [this, i](){ vkDestroyFence( vk_device, frames[i].render_fence, nullptr ); });
+
+		VK_CHECK( vkCreateSemaphore( vk_device, &sem_cr_inf, nullptr, &frames[i].render_sema ));
+		VK_CHECK( vkCreateSemaphore( vk_device, &sem_cr_inf, nullptr, &frames[i].present_sema ));
+
+		deletion_queue.emplace_function( [this, i](){ vkDestroySemaphore( vk_device, frames[i].render_sema, nullptr ); });
+		deletion_queue.emplace_function( [this, i](){ vkDestroySemaphore( vk_device, frames[i].present_sema, nullptr ); });
+	}
 
 }
 
@@ -491,6 +499,8 @@ void VkEngine::init_vk_pipelines(){
 
 	pipe_lay_cr_inf.pushConstantRangeCount = 1;
 	pipe_lay_cr_inf.pPushConstantRanges = &push_constant;
+	pipe_lay_cr_inf.setLayoutCount = 1;
+	pipe_lay_cr_inf.pSetLayouts = &global_desc_layout;
 
 	VkPipelineLayout triangle_layout;
 
@@ -643,10 +653,22 @@ Mesh* VkEngine::get_mesh( const std::string& name ){
 }
 
 void VkEngine::draw_objects( VkCommandBuffer cmd, RenderableObject* first, int count ){
+
 	glm::vec3 camPos{ 0.0f, 0.0f, -4.0f };
 	glm::mat4 proj = glm::perspective( static_cast<float>( 0.25 * M_PI ), static_cast<float>( windowExtent.width ) / static_cast<float>( windowExtent.height ), 0.01f, 200.0f );
 	proj[1][1] *= -1;
 	glm::mat4 view = glm::translate( camPos );
+
+	GpuCamData cam_data{
+		.view = view,
+		.proj = proj,
+		.view_proj = proj * view,
+	};
+
+	void* data;
+	vmaMapMemory( vma_alloc, get_curr_frame().camera_buf.allocation, &data );
+	memcpy( data, &cam_data, sizeof( GpuCamData ));
+	vmaUnmapMemory( vma_alloc, get_curr_frame().camera_buf.allocation );
 
 	Mesh* last_mesh = nullptr;
 	Material* last_mat = nullptr;
@@ -657,13 +679,12 @@ void VkEngine::draw_objects( VkCommandBuffer cmd, RenderableObject* first, int c
 		if( curr.mat != last_mat ){
 			vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, curr.mat->pipeline );
 			last_mat = curr.mat;
+
+			vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, curr.mat->layout, 0, 1, &get_curr_frame().global_desc, 0, nullptr );
 		}
 
-		glm::mat4 model = curr.transform;
-		glm::mat4 mod_view_proj = proj * view * model * glm::rotate( frameNumber * 0.04f, glm::vec3{ 0.0f, 1.0f, 0.0f });
-
 		PushConstants consts{
-			.camera = mod_view_proj,
+			.camera = curr.transform * glm::rotate( frameNumber * 0.04f, glm::vec3{ 0.0f, 1.0f, 0.0f }),
 		};
 
 		vkCmdPushConstants( cmd, curr.mat->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( PushConstants ), &consts );
@@ -713,5 +734,102 @@ void VkEngine::init_scene(){
 			tri.transform = glm::scale( glm::vec3{ 0.3, 0.3, 0.3 }) * glm::translate( glm::vec3{ x - 10, y - 10.0f, 0 }) * glm::scale( glm::vec3{ 0.5f });
 			objects.push_back( tri );
 		}
+	}
+}
+
+FrameData& VkEngine::get_curr_frame(){
+	return frames[frameNumber % FRAME_OVERLAP];
+}
+
+AllocatedBuffer VkEngine::create_buffer( size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memory_usage ){
+	VkBufferCreateInfo buf_inf{
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = nullptr,
+		.size = size,
+		.usage = usage,
+	};
+
+	VmaAllocationCreateInfo vma_alloc_inf{
+		.usage = memory_usage,
+	};
+
+	AllocatedBuffer buf;
+
+	VK_CHECK( vmaCreateBuffer( vma_alloc, &buf_inf, &vma_alloc_inf, &buf.buffer, &buf.allocation, nullptr ));
+
+	deletion_queue.emplace_function( [this, buf](){ vmaDestroyBuffer( vma_alloc, buf.buffer, buf.allocation ); });
+
+	return buf;
+}
+
+void VkEngine::init_descriptors(){
+
+	VkDescriptorSetLayoutBinding binding{
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+	};
+
+	VkDescriptorSetLayoutCreateInfo desc_set_lay_cr_inf{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.pNext = nullptr,
+		.bindingCount = 1,
+		.pBindings = &binding,
+	};
+
+	vkCreateDescriptorSetLayout( vk_device, &desc_set_lay_cr_inf, nullptr, &global_desc_layout );
+
+	deletion_queue.emplace_function( [this](){ vkDestroyDescriptorSetLayout( vk_device, global_desc_layout, nullptr ); });
+
+	std::vector<VkDescriptorPoolSize> sizes =
+	{
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
+	};
+
+	VkDescriptorPoolCreateInfo desc_pool_cr_inf{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.maxSets = 10,
+		.poolSizeCount = static_cast<uint32_t>( sizes.size() ),
+		.pPoolSizes = sizes.data(),
+	};
+
+	vkCreateDescriptorPool( vk_device, &desc_pool_cr_inf, nullptr, &desc_pool );
+
+	deletion_queue.emplace_function( [this](){ vkDestroyDescriptorPool( vk_device, desc_pool, nullptr ); });
+
+
+	for( size_t i = 0; i < FRAME_OVERLAP; ++i ){
+		frames[i].camera_buf = create_buffer( sizeof( GpuCamData ), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU );
+
+		VkDescriptorSetAllocateInfo alloc_inf{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.pNext = nullptr,
+			.descriptorPool = desc_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &global_desc_layout,
+		};
+
+		vkAllocateDescriptorSets( vk_device, &alloc_inf, &frames[i].global_desc );
+
+		VkDescriptorBufferInfo buf_inf{
+			.buffer = frames[i].camera_buf.buffer,
+			.offset = 0,
+			.range = sizeof( GpuCamData ),
+		};
+
+		VkWriteDescriptorSet set_write{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.pNext = nullptr,
+			.dstSet = frames[i].global_desc,
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.pBufferInfo = &buf_inf,
+		};
+
+		vkUpdateDescriptorSets( vk_device, 1, &set_write, 0, nullptr );
 	}
 }
