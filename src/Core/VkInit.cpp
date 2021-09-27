@@ -230,3 +230,36 @@ VkPipelineDepthStencilStateCreateInfo vkinit::depth_stencil_state_create_info(
 	};
 }
 
+VkSamplerCreateInfo vkinit::sampler_create_info(
+		VkFilter filter,
+		VkSamplerAddressMode address_mode
+	){
+
+	return VkSamplerCreateInfo {
+		.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+		.pNext = nullptr,
+		.magFilter = filter,
+		.minFilter = filter,
+		.addressModeU = address_mode,
+		.addressModeV = address_mode,
+		.addressModeW = address_mode,
+	};
+}
+
+VkWriteDescriptorSet vkinit::write_descriptor_set_image(
+		VkDescriptorType type,
+		VkDescriptorSet dst_set,
+		VkDescriptorImageInfo* img_info,
+		uint32_t binding
+	){
+
+	return VkWriteDescriptorSet {
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.pNext = nullptr,
+		.dstSet = dst_set,
+		.dstBinding = binding,
+		.descriptorCount = 1,
+		.descriptorType = type,
+		.pImageInfo = img_info,
+	};
+}

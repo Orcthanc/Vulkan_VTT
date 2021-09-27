@@ -29,8 +29,14 @@ struct DelQueue {
 };
 
 struct Material {
+	VkDescriptorSet tex_set{ VK_NULL_HANDLE };
 	VkPipeline pipeline;
 	VkPipelineLayout layout;
+};
+
+struct Texture {
+	AllocatedImage img;
+	VkImageView view;
 };
 
 struct RenderableObject {
@@ -56,6 +62,11 @@ struct GpuCamData {
 	glm::mat4 view_proj;
 };
 
+struct UploadContext {
+	VkFence fence;
+	VkCommandPool cmd_pool;
+};
+
 struct VkEngine {
 	public:
 		//General
@@ -78,6 +89,7 @@ struct VkEngine {
 
 		std::unordered_map<std::string, Material> materials;
 		std::unordered_map<std::string, Mesh> meshes;
+		std::unordered_map<std::string, Texture> textures;
 
 		Material* create_material( VkPipeline pipeline, VkPipelineLayout layout, const std::string& name );
 		Material* get_material( const std::string& name );
@@ -96,6 +108,8 @@ struct VkEngine {
 
 		DelQueue deletion_queue;
 		VmaAllocator vma_alloc;
+
+		UploadContext upload_context;
 
 		//Swapchain
 		VkSwapchainKHR vk_swapchain;
@@ -121,6 +135,7 @@ struct VkEngine {
 		std::vector<VkFramebuffer> vk_framebuffers;
 
 		VkDescriptorSetLayout global_desc_layout;
+		VkDescriptorSetLayout single_tex_layout;
 		VkDescriptorPool desc_pool;
 
 
@@ -138,14 +153,18 @@ struct VkEngine {
 		void init_vk_pipelines();
 
 		void load_meshes();
+		void load_images();
 
 		void init_scene();
 
 		void init_descriptors();
 
+	public:
 		//Vulkan helpers
 		bool vk_load_shader( const char* path, VkShaderModule* shader );
 		void upload_mesh( Mesh& mesh );
+
+		void immediate_submit( std::function<void( VkCommandBuffer )>&& func );
 
 		AllocatedBuffer create_buffer( size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memory_usage );
 };

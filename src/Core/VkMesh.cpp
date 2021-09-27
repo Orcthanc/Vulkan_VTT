@@ -31,5 +31,12 @@ VertexInputDescription Vertex::get_vk_description(){
 			.offset = offsetof( Vertex, color ),
 		});
 
+	desc.attributes.emplace_back( VkVertexInputAttributeDescription{
+			.location = 3,
+			.binding = 0,
+			.format = VK_FORMAT_R32G32B32A32_SFLOAT,
+			.offset = offsetof( Vertex, uv1_uv2 ),
+		});
+
 	return desc;
 }

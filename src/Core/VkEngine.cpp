@@ -1,6 +1,7 @@
 #include "Core/VkEngine.hpp"
 #include "Core/VkMesh.hpp"
 #include "Core/VkTypes.hpp"
+#include "Core/VkTexture.hpp"
 
 #ifdef _WIN32
 #define _USE_MATH_DEFINES
@@ -36,6 +37,18 @@
 		} 														\
 	}while( 0 )
 
+
+#ifdef NO_FILE_PREFIX
+	#define FILE_PREFIX
+#else
+	#if _WIN32
+		#define FILE_PREFIX "../../../../"
+	#else
+		#define FILE_PREFIX "../../"
+	#endif
+#endif
+
+
 void VkEngine::init(){
 	SDL_Init( SDL_INIT_VIDEO );
 
@@ -62,6 +75,7 @@ void VkEngine::init(){
 	init_vk_pipelines();
 
 	load_meshes();
+	load_images();
 
 	init_scene();
 
@@ -336,6 +350,13 @@ void VkEngine::init_vk_cmd(){
 
 		VK_CHECK( vkAllocateCommandBuffers( vk_device, &cmd_alloc_inf, &frames[i].main_buf ));
 	}
+
+	auto up_cmd_pl_inf = vkinit::command_pool_create_info( vk_graphics_queue_family );
+	VK_CHECK( vkCreateCommandPool( vk_device, &up_cmd_pl_inf, nullptr, &upload_context.cmd_pool ));
+
+	deletion_queue.emplace_function( [this](){
+			vkDestroyCommandPool( vk_device, upload_context.cmd_pool, nullptr );
+		});
 }
 
 void VkEngine::init_vk_default_renderpass(){
@@ -421,8 +442,15 @@ void VkEngine::init_vk_framebuffers(){
 }
 
 void VkEngine::init_vk_sync(){
-	auto fence_cr_inf = vkinit::fence_create_info( VK_FENCE_CREATE_SIGNALED_BIT );
+	auto fence_cr_inf = vkinit::fence_create_info( 0 );
 	auto sem_cr_inf = vkinit::semaphore_create_info();
+
+	VK_CHECK( vkCreateFence( vk_device, &fence_cr_inf, nullptr, &upload_context.fence ));
+	deletion_queue.emplace_function( [this](){
+			vkDestroyFence( vk_device, upload_context.fence, nullptr );
+		});
+
+	fence_cr_inf.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
 	for( size_t i = 0; i < FRAME_OVERLAP; ++i ){
 		VK_CHECK( vkCreateFence( vk_device, &fence_cr_inf, nullptr, &frames[i].render_fence ));
@@ -471,16 +499,6 @@ void VkEngine::init_vk_pipelines(){
 	VkShaderModule triVert{}, triFrag{};
 
 
-#ifdef NO_FILE_PREFIX
-	#define FILE_PREFIX
-#else
-	#if _WIN32
-		#define FILE_PREFIX "../../../../"
-	#else
-		#define FILE_PREFIX "../../"
-	#endif
-#endif
-
 	if (!vk_load_shader(FILE_PREFIX "shader/triangle.vert.spv", &triVert)) {
 		std::cout << "Failed to load vert shader" << std::endl;
 	}
@@ -497,10 +515,12 @@ void VkEngine::init_vk_pipelines(){
 		.size = sizeof( PushConstants ),
 	};
 
+	VkDescriptorSetLayout layouts[2] = { global_desc_layout, single_tex_layout };
+
 	pipe_lay_cr_inf.pushConstantRangeCount = 1;
 	pipe_lay_cr_inf.pPushConstantRanges = &push_constant;
-	pipe_lay_cr_inf.setLayoutCount = 1;
-	pipe_lay_cr_inf.pSetLayouts = &global_desc_layout;
+	pipe_lay_cr_inf.setLayoutCount = 2;
+	pipe_lay_cr_inf.pSetLayouts = layouts;
 
 	VkPipelineLayout triangle_layout;
 
@@ -625,6 +645,50 @@ void VkEngine::load_meshes(){
 	upload_mesh(triangle_mesh);
 
 	meshes["triangle"] = triangle_mesh;
+
+	Mesh plate;
+	plate.vertices.resize( 6 );
+
+	plate.vertices[0] = Vertex{
+		.pos =     { 0.5f, 0.5f, 0.0f },
+		.normal =  { 0.0f, 0.0f,-1.0f },
+		.color =   { 1.0f, 1.0f, 1.0f },
+		.uv1_uv2 = { 1.0f, 1.0f, 0.0f, 0.0f },
+	};
+	plate.vertices[1] = Vertex{
+		.pos =     {-0.5f, 0.5f, 0.0f },
+		.normal =  { 0.0f, 0.0f,-1.0f },
+		.color =   { 1.0f, 1.0f, 1.0f },
+		.uv1_uv2 = { 0.0f, 1.0f, 0.0f, 0.0f },
+	};
+	plate.vertices[2] = Vertex{
+		.pos =     {-0.5f,-0.5f, 0.0f },
+		.normal =  { 0.0f, 0.0f,-1.0f },
+		.color =   { 1.0f, 1.0f, 1.0f },
+		.uv1_uv2 = { 0.0f, 0.0f, 0.0f, 0.0f },
+	};
+	plate.vertices[3] = Vertex{
+		.pos =     {-0.5f,-0.5f, 0.0f },
+		.normal =  { 0.0f, 0.0f,-1.0f },
+		.color =   { 1.0f, 1.0f, 1.0f },
+		.uv1_uv2 = { 0.0f, 0.0f, 0.0f, 0.0f },
+	};
+	plate.vertices[4] = Vertex{
+		.pos =     { 0.5f,-0.5f, 0.0f },
+		.normal =  { 0.0f, 0.0f,-1.0f },
+		.color =   { 1.0f, 1.0f, 1.0f },
+		.uv1_uv2 = { 1.0f, 0.0f, 0.0f, 0.0f },
+	};
+	plate.vertices[5] = Vertex{
+		.pos =     { 0.5f, 0.5f, 0.0f },
+		.normal =  { 0.0f, 0.0f,-1.0f },
+		.color =   { 1.0f, 1.0f, 1.0f },
+		.uv1_uv2 = { 1.0f, 1.0f, 0.0f, 0.0f },
+	};
+
+	upload_mesh( plate );
+
+	meshes["plane"] = plate;
 }
 
 Material* VkEngine::create_material( VkPipeline pipeline, VkPipelineLayout layout, const std::string& name ){
@@ -681,10 +745,14 @@ void VkEngine::draw_objects( VkCommandBuffer cmd, RenderableObject* first, int c
 			last_mat = curr.mat;
 
 			vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, curr.mat->layout, 0, 1, &get_curr_frame().global_desc, 0, nullptr );
+
+			if( curr.mat->tex_set ){
+				vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, curr.mat->layout, 1, 1, &curr.mat->tex_set, 0, nullptr );
+			}
 		}
 
 		PushConstants consts{
-			.camera = curr.transform * glm::rotate( frameNumber * 0.04f, glm::vec3{ 0.0f, 1.0f, 0.0f }),
+			.camera = curr.transform /* * glm::rotate( frameNumber * 0.04f, glm::vec3{ 0.0f, 1.0f, 0.0f }) */,
 		};
 
 		vkCmdPushConstants( cmd, curr.mat->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( PushConstants ), &consts );
@@ -724,14 +792,43 @@ void VkEngine::upload_mesh( Mesh& mesh ){
 
 void VkEngine::init_scene(){
 	RenderableObject tri{
-		.mesh = get_mesh( "triangle" ),
+		.mesh = get_mesh( "plane" ),
 		.mat = get_material( "default" ),
 		.transform = glm::mat4( 1.0f ),
 	};
 
+	auto sampler_inf = vkinit::sampler_create_info( VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT );
+
+	VkSampler block_sampler;
+	vkCreateSampler( vk_device, &sampler_inf, nullptr, &block_sampler );
+
+	deletion_queue.emplace_function( [this, block_sampler](){
+			vkDestroySampler( vk_device, block_sampler, nullptr );
+		});
+
+	VkDescriptorSetAllocateInfo alloc_inf{
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.pNext = nullptr,
+		.descriptorPool = desc_pool,
+		.descriptorSetCount = 1,
+		.pSetLayouts = &single_tex_layout,
+	};
+
+	vkAllocateDescriptorSets( vk_device, &alloc_inf, &tri.mat->tex_set );
+
+	VkDescriptorImageInfo img_inf{
+		.sampler = block_sampler,
+		.imageView = textures["outline"].view,
+		.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	};
+
+	auto tex1_write = vkinit::write_descriptor_set_image( VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, tri.mat->tex_set, &img_inf, 0 );
+
+	vkUpdateDescriptorSets( vk_device, 1, &tex1_write, 0, nullptr );
+
 	for( int y = 0; y < 21; ++y ){
 		for( int x = 0; x < 21; ++x ){
-			tri.transform = glm::scale( glm::vec3{ 0.3, 0.3, 0.3 }) * glm::translate( glm::vec3{ x - 10, y - 10.0f, 0 }) * glm::scale( glm::vec3{ 0.5f });
+			tri.transform = /* glm::scale( glm::vec3{ 0.3, 0.3, 0.3 }) * */ glm::translate( glm::vec3{ x - 10, y - 10.0f, 0 }) /* * glm::scale( glm::vec3{ 0.5f }) */;
 			objects.push_back( tri );
 		}
 	}
@@ -757,8 +854,6 @@ AllocatedBuffer VkEngine::create_buffer( size_t size, VkBufferUsageFlags usage, 
 
 	VK_CHECK( vmaCreateBuffer( vma_alloc, &buf_inf, &vma_alloc_inf, &buf.buffer, &buf.allocation, nullptr ));
 
-	deletion_queue.emplace_function( [this, buf](){ vmaDestroyBuffer( vma_alloc, buf.buffer, buf.allocation ); });
-
 	return buf;
 }
 
@@ -778,13 +873,32 @@ void VkEngine::init_descriptors(){
 		.pBindings = &binding,
 	};
 
-	vkCreateDescriptorSetLayout( vk_device, &desc_set_lay_cr_inf, nullptr, &global_desc_layout );
+	VkDescriptorSetLayoutBinding binding_tex {
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+	};
 
-	deletion_queue.emplace_function( [this](){ vkDestroyDescriptorSetLayout( vk_device, global_desc_layout, nullptr ); });
+	VkDescriptorSetLayoutCreateInfo desc_set_tex_cr_inf {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.pNext = nullptr,
+		.bindingCount = 1,
+		.pBindings = &binding_tex,
+	};
+
+	vkCreateDescriptorSetLayout( vk_device, &desc_set_lay_cr_inf, nullptr, &global_desc_layout );
+	vkCreateDescriptorSetLayout( vk_device, &desc_set_tex_cr_inf, nullptr, &single_tex_layout );
+
+	deletion_queue.emplace_function( [this](){
+			vkDestroyDescriptorSetLayout( vk_device, single_tex_layout, nullptr );
+			vkDestroyDescriptorSetLayout( vk_device, global_desc_layout, nullptr );
+		});
 
 	std::vector<VkDescriptorPoolSize> sizes =
 	{
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10 },
 	};
 
 	VkDescriptorPoolCreateInfo desc_pool_cr_inf{
@@ -803,6 +917,10 @@ void VkEngine::init_descriptors(){
 
 	for( size_t i = 0; i < FRAME_OVERLAP; ++i ){
 		frames[i].camera_buf = create_buffer( sizeof( GpuCamData ), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU );
+
+		deletion_queue.emplace_function( [this, i](){
+				vmaDestroyBuffer( vma_alloc, frames[i].camera_buf.buffer, frames[i].camera_buf.allocation );
+			});
 
 		VkDescriptorSetAllocateInfo alloc_inf{
 			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -832,4 +950,52 @@ void VkEngine::init_descriptors(){
 
 		vkUpdateDescriptorSets( vk_device, 1, &set_write, 0, nullptr );
 	}
+}
+
+void VkEngine::immediate_submit( std::function<void( VkCommandBuffer )>&& func ){
+	VkCommandBufferAllocateInfo cmd_alloc = vkinit::command_buffer_allocate_info( upload_context.cmd_pool );
+
+	VkCommandBuffer buf;
+	VK_CHECK( vkAllocateCommandBuffers(vk_device, &cmd_alloc, &buf ));
+
+	VkCommandBufferBeginInfo cmd_beg = vkinit::command_buffer_begin_info( VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT );
+
+	VK_CHECK( vkBeginCommandBuffer( buf, &cmd_beg ));
+
+	func( buf );
+
+	VK_CHECK( vkEndCommandBuffer( buf ));
+
+	VkSubmitInfo sub_inf{
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.pNext = nullptr,
+		.waitSemaphoreCount = 0,
+		.pWaitSemaphores = nullptr,
+		.pWaitDstStageMask = nullptr,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &buf,
+		.signalSemaphoreCount = 0,
+		.pSignalSemaphores = nullptr,
+	};
+
+	VK_CHECK( vkQueueSubmit( vk_graphics_queue, 1, &sub_inf, upload_context.fence ));
+
+	vkWaitForFences( vk_device, 1, &upload_context.fence, VK_TRUE, 999999999999 );
+	vkResetFences( vk_device, 1, &upload_context.fence );
+
+	vkResetCommandPool( vk_device, upload_context.cmd_pool, 0 );
+}
+
+void VkEngine::load_images(){
+	Texture outline;
+
+	vkutil::load_image_file( *this, FILE_PREFIX "assets/outline.png", outline.img );
+
+	auto view_cr = vkinit::image_view_create_info( VK_FORMAT_R8G8B8A8_SRGB, outline.img.image, VK_IMAGE_ASPECT_COLOR_BIT );
+	VK_CHECK( vkCreateImageView( vk_device, &view_cr, nullptr, &outline.view ));
+	deletion_queue.emplace_function( [this, outline](){
+			vkDestroyImageView( vk_device, outline.view, nullptr );
+		});
+
+	textures["outline"] = outline;
 }

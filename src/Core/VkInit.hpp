@@ -75,4 +75,16 @@ namespace vkinit {
 			VkBool32 depth_write,
 			VkCompareOp op
 		);
+
+	VkSamplerCreateInfo sampler_create_info(
+			VkFilter filter,
+			VkSamplerAddressMode address_mode
+		);
+
+	VkWriteDescriptorSet write_descriptor_set_image(
+			VkDescriptorType type,
+			VkDescriptorSet dst_set,
+			VkDescriptorImageInfo* img_info,
+			uint32_t binding
+		);
 }

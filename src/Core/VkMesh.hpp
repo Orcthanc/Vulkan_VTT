@@ -20,6 +20,7 @@ struct Vertex {
 	glm::vec3 pos;
 	glm::vec3 normal;
 	glm::vec3 color;
+	glm::vec4 uv1_uv2;
 
 	static VertexInputDescription get_vk_description();
 };
