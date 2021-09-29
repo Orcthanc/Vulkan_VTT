@@ -2,6 +2,7 @@
 #include "Core/VkMesh.hpp"
 #include "Core/VkTypes.hpp"
 #include "Core/VkTexture.hpp"
+#include <SDL_keyboard.h>
 
 #ifdef _WIN32
 #define _USE_MATH_DEFINES
@@ -158,28 +159,7 @@ void VkEngine::draw(){
 	};
 
 	vkCmdBeginRenderPass( get_curr_frame().main_buf, &render_beg_inf, VK_SUBPASS_CONTENTS_INLINE );
-/*
-	vkCmdBindPipeline( main_cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, triangle_pipeline );
 
-	VkDeviceSize offset = 0;
-	vkCmdBindVertexBuffers( main_cmd_buf, 0, 1, &triangle_mesh.buffer.buffer, &offset );
-
-	glm::vec3 camPos{ 0.0f, 0.0f, -4.0f };
-	glm::mat4 proj = glm::perspective( static_cast<float>( 0.25 * M_PI ), static_cast<float>( windowExtent.width ) / static_cast<float>( windowExtent.height ), 0.01f, 200.0f );
-	proj[1][1] *= -1;
-	glm::mat4 view = glm::translate( camPos );
-	glm::mat4 model = glm::rotate( frameNumber * 0.04f, glm::vec3{ 0.0f, 1.0f, 0.0f });
-
-	glm::mat4 mod_view_proj = proj * view * model;
-
-	PushConstants consts{
-		.camera = mod_view_proj,
-	};
-
-	vkCmdPushConstants( main_cmd_buf, triangle_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( PushConstants ), &consts );
-
-	vkCmdDraw( main_cmd_buf, triangle_mesh.vertices.size(), 1, 0, 0 );
-*/
 	draw_objects( get_curr_frame().main_buf, objects.data(), objects.size() );
 
 	vkCmdEndRenderPass( get_curr_frame().main_buf );
@@ -220,10 +200,54 @@ void VkEngine::run(){
 	SDL_Event e;
 	bool quit = false;
 
+	float dT = 0.013;
+
 	while( !quit ){
 		while( SDL_PollEvent( &e )){
 			if( e.type == SDL_QUIT )
 				quit = true;
+			switch( e.type ){
+				case SDL_QUIT:
+				{
+					quit = true;
+					break;
+				}
+				case SDL_MOUSEWHEEL:
+				{
+					cam.move_from_anchor({ 0.0f, e.wheel.y * dT * 100 });
+					break;
+				}
+			}
+		}
+		
+		// Keys
+		{
+			const Uint8* state = SDL_GetKeyboardState( nullptr );
+
+			float rotate{};
+			glm::vec3 move{};
+
+			if( state[SDL_SCANCODE_Q] ){
+				rotate -= 1 * dT;
+			}
+			if( state[SDL_SCANCODE_E] ){
+				rotate += 1 * dT;
+			}
+			if( state[SDL_SCANCODE_W] ){
+				move.x += 10 * dT;
+			}
+			if( state[SDL_SCANCODE_S] ){
+				move.x -= 10 * dT;
+			}
+			if( state[SDL_SCANCODE_D] ){
+				move.z += 10 * dT;
+			}
+			if( state[SDL_SCANCODE_A] ){
+				move.z -= 10 * dT;
+			}
+
+			cam.rotate_around_origin( rotate );
+			cam.move_anchor( move );
 		}
 
 		draw();
@@ -718,10 +742,10 @@ Mesh* VkEngine::get_mesh( const std::string& name ){
 
 void VkEngine::draw_objects( VkCommandBuffer cmd, RenderableObject* first, int count ){
 
-	glm::vec3 camPos{ 0.0f, 0.0f, -4.0f };
-	glm::mat4 proj = glm::perspective( static_cast<float>( 0.25 * M_PI ), static_cast<float>( windowExtent.width ) / static_cast<float>( windowExtent.height ), 0.01f, 200.0f );
-	proj[1][1] *= -1;
-	glm::mat4 view = glm::translate( camPos );
+	//cam.rotate_around_origin( 0.02 );
+
+	glm::mat4 proj = cam.get_proj();
+	glm::mat4 view = cam.get_view();
 
 	GpuCamData cam_data{
 		.view = view,
@@ -791,6 +815,11 @@ void VkEngine::upload_mesh( Mesh& mesh ){
 }
 
 void VkEngine::init_scene(){
+	glm::mat4 proj = glm::perspective( static_cast<float>( 0.25 * M_PI ), static_cast<float>( windowExtent.width ) / static_cast<float>( windowExtent.height ), 0.01f, 200.0f );
+	proj[1][1] *= -1;
+	cam.set_proj( proj );
+
+
 	RenderableObject tri{
 		.mesh = get_mesh( "plane" ),
 		.mat = get_material( "default" ),
@@ -828,7 +857,7 @@ void VkEngine::init_scene(){
 
 	for( int y = 0; y < 21; ++y ){
 		for( int x = 0; x < 21; ++x ){
-			tri.transform = /* glm::scale( glm::vec3{ 0.3, 0.3, 0.3 }) * */ glm::translate( glm::vec3{ x - 10, y - 10.0f, 0 }) /* * glm::scale( glm::vec3{ 0.5f }) */;
+			tri.transform = glm::translate( glm::vec3{ x - 10.0f, 0, y - 10.0f }) * glm::rotate<float>( 0.5 * M_PI, glm::vec3{ 1.0f, 0.0f, 0.0f });
 			objects.push_back( tri );
 		}
 	}

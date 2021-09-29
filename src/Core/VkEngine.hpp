@@ -2,6 +2,7 @@
 
 #include "VkTypes.hpp"
 #include "VkMesh.hpp"
+#include "Camera/StrategyCam.hpp"
 
 #include <vk_mem_alloc.h>
 
@@ -85,6 +86,8 @@ struct VkEngine {
 
 	public:
 		//Scene
+		StrategyCamera cam;
+
 		std::vector<RenderableObject> objects;
 
 		std::unordered_map<std::string, Material> materials;
