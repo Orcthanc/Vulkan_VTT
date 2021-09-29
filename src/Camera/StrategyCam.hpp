@@ -17,10 +17,10 @@ struct StrategyCamera {
 		float min_height{ 1 };
 
 	private:
-		glm::vec3 origin;
+		glm::vec3 origin{};
 		float rotation{ 0 };
 		float height{ 20 };
 		float distance{ 20 };
 
-		glm::mat4 proj;
+		glm::mat4 proj{ 1.0f };
 };
